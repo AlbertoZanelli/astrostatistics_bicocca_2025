@@ -1,0 +1,229 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{Exercise presentations: EX09, EX11 -- EX16}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+%=====================================================================
+\section{EX09: MCMC and nested sampling on a transient signal}
+
+\subsection*{Objective}
+
+The goal of this exercise is a Bayesian analysis of an astrophysical transient. I estimated the parameters of a burst model with MCMC. Then I repeated the fit with nested sampling and checked that the results are consistent. Finally I compared two alternative models for the same data using the Bayesian evidence and the Bayes factor. So the exercise covers the full pipeline of Bayesian inference: first parameter estimation, then model selection. It also shows the key difference between the two tools: MCMC samples the posterior but does not give the evidence, nested sampling gives both.
+
+\subsection*{Data and model}
+
+The data are 100 measurements (time, flux, uncertainty), with homoscedastic errors. They show a constant background level, then a sharp rise, then a decay. The first model is a sharp burst with an exponential tail, with 4 parameters: $y = b$ for $t < t_0$, and $y = b + A\,e^{-\alpha(t-t_0)}$ for $t \ge t_0$. Here $b$ is the background, $A$ is the burst amplitude, $t_0$ is the burst epoch and $\alpha$ sets how fast the burst dies off.
+
+The errors are Gaussian and independent, so the log-likelihood is the standard Gaussian one:
+\[
+\ln\mathcal{L} = -\frac{1}{2}\sum_i\left[\log(2\pi\sigma_i^2) + \frac{(y_i-m_i)^2}{\sigma_i^2}\right].
+\]
+This is the chi square plus the normalization term. The priors are uniform: $b, A \in U[0,50]$ and $t_0 \in U[0,100]$. For $\alpha$ the prior is uniform in $\ln\alpha \in [-5,5]$. The log-uniform choice is natural for a scale parameter whose order of magnitude is unknown. It is equivalent to a prior $\propto 1/\alpha$, and in fact the log-prior contains a $-\log\alpha$ term plus a normalization constant. The log-posterior is just log-prior plus log-likelihood, and it is $-\infty$ outside the prior support.
+
+\subsection*{Part 1: MCMC with emcee}
+
+I used \texttt{emcee}, an affine invariant ensemble sampler, with 20 walkers and 70000 steps. The walkers start in a small Gaussian cloud around a plausible point.
+
+Then I checked the quality of the chain. First, the trace plots of the 4 parameters, to assess the burn-in. The burn-in is the initial phase where the chain has not yet reached the stationary distribution, so it must be discarded. From the plots I chose to discard the first 1000 steps. Second, the thinning. Consecutive MCMC samples are correlated, so I estimated the autocorrelation time with \texttt{get\_autocorr\_time} and kept one sample every $\tau$ (the maximum over the parameters). This gives approximately independent samples.
+
+With the cleaned chain I made the 4D corner plot, with the 68\% and 95\% credible levels and the quantiles. It shows the marginalized distributions and the correlations between parameters. As a posterior predictive check, I drew 100 random samples from the chain and plotted the 100 corresponding burst curves on top of the data. Finally, for each parameter I reported the median and the 90\% credible interval (percentiles 5, 50, 95), in the form $X^{+Y}_{-Z}$.
+
+\subsection*{Part 2: Nested sampling with dynesty}
+
+I repeated the same fit with \texttt{dynesty}. In nested sampling the prior is defined through the prior transform: a map from the unit hypercube $[0,1]^4$ to the physical parameter space. I implemented it with the ppf (the inverse CDF) of \texttt{uniform} for $b$, $A$, $t_0$ and of \texttt{loguniform} for $\alpha$. I used a static sampler with 1000 live points. The correctness check is the corner plot: I reweighted the nested samples (weights $\exp(\log w - \log Z)$, then \texttt{resample\_equal}) and the result is equivalent to the emcee one. Same posterior, obtained with two different algorithms.
+
+The added value of nested sampling is the evidence. For the burst model I get $\log Z_1 = -155.34 \pm 0.28$.
+
+\subsection*{Part 3: Alternative model and comparison}
+
+The second model is a Gaussian profile, $y = b + A\,e^{-(t-t_0)^2/2\sigma_w^2}$, also with 4 parameters, with similar priors and $\sigma_w$ log-uniform. Fitted with the same procedure, it gives $\log Z_2 = -159.96 \pm 0.31$.
+
+For the comparison I use the odds ratio $O_{12} = B_{12}\cdot\Pi_1/\Pi_2$, where $B_{12}$ is the Bayes factor (the ratio of the evidences) and $\Pi_1/\Pi_2$ is the ratio of the priors on the models. I set it to 1, since I have no reason to prefer one model a priori. The result is $B_{12} = e^{\Delta\log Z} \approx 102$, that is $\log_{10}B_{12} \approx 2$. On the Jeffreys scale this is decisive evidence in favor of the burst model. This makes physical sense: the asymmetric exponential decay describes the tail of the data much better than the symmetric Gaussian profile.
+
+%=====================================================================
+\section{EX11: Clustering the Gamma Ray Burst catalogue}
+
+\subsection*{Objective}
+
+The goal of this exercise is an open-ended exploration of the GRBweb catalogue of Gamma Ray Bursts. The physical questions are: does the population contain sub-populations, and how many? Where is the threshold between the classes? Do different clustering methods agree? How do they respond to outliers? Which variable shows the multi-modality best? Are all GRBs equally likely to be observed? I answered these questions with density estimation, Gaussian mixtures and several clustering algorithms.
+
+\subsection*{Data}
+
+The catalogue contains about 9200 GRBs with 15 columns. I kept the events with positive $T_{90}$, fluence and $T_{100}$, which leaves 7850 bursts. These quantities span many orders of magnitude, so I work in $\log_{10}$. Only 680 bursts have a measured redshift, a first sign of strong selection effects. As a sanity check I plotted the sky map: the distribution is isotropic, consistent with a cosmological origin.
+
+\subsection*{One-dimensional distributions}
+
+For $\log T_{90}$, $\log$ fluence and $\log T_{100}$ I overplotted a histogram and a KDE. The KDE bandwidth was chosen by cross validation with \texttt{GridSearchCV}, and the peaks were located with \texttt{find\_peaks}. The result: $\log T_{90}$ and $\log T_{100}$ are clearly bimodal, with peaks around $0.9$ s and $37$ s. The fluence is unimodal, so energy alone does not separate the classes. The variable that shows the multi-modality best is $T_{90}$.
+
+To count the components I fitted Gaussian mixtures with $k=1\ldots6$ to $\log T_{90}$ and compared BIC and AIC. Both prefer $k=2$: two log-normal populations, short bursts around $1$ s (24\%) and long bursts around $30$ s (76\%). The threshold is computed directly from the two-Gaussian fit as the crossing point of the two weighted Gaussians,
+\[
+w_1\,\mathcal N(x;\mu_1,\sigma_1) = w_2\,\mathcal N(x;\mu_2,\sigma_2),
+\]
+which is the Bayes decision boundary. Solving numerically with \texttt{fsolve} gives $T_{90}\simeq 3.8$ s. A K-Means clustering in 1D, with the two clusters visualized as weighted KDEs, gives a separation around $5.3$ s. Both values bracket the canonical $2$ s: the divide is a soft crossover, not a hard cut.
+
+\subsection*{Two-dimensional clustering}
+
+I then clustered in the plane $(\log T_{90}, \log \mathrm{fluence})$ with three algorithms, choosing the number of groups with a criterion, before and after removing outliers with DBSCAN (75 outliers at $\varepsilon=0.3$ on standardized features).
+
+\textbf{Gaussian Mixture.} The AIC prefers $k=3$ with all data and $k=8$ after outlier removal: AIC is a permissive criterion and over-segments. The silhouette score prefers $k=2$ in both cases. Forcing the physical $k=2$ solution, the threshold from the weighted-Gaussian crossing is $T_{90}\simeq 4.3$ s.
+
+\textbf{K-Means.} The silhouette score prefers $k=2$ both before and after outlier removal. The threshold is the midpoint of the two centroid coordinates in $\log T_{90}$, which gives $T_{90}\simeq 6.3$ s.
+
+\textbf{MeanShift.} This method has no number-of-clusters knob: it climbs the density towards its modes, with the bandwidth set by \texttt{estimate\_bandwidth}. With the outliers in, it finds 3 clusters, but they are driven by the sparse tails. After removing the outliers it finds a single cluster, and removing more outliers does not help. The two GRB populations overlap in density, they differ in location and not by a density gap, so a pure mode seeker cannot separate them. MeanShift is very sensitive to outliers and it is the wrong tool here.
+
+\subsection*{Conclusions}
+
+Two populations are securely required, short and long GRBs, corresponding physically to compact binary mergers and to collapsing massive stars. The threshold is a few seconds and depends on the estimator, consistent with the historical $2$ s. K-Means and GMM agree on the existence of the split but not on its exact location. MeanShift fails. Not all GRBs are equally observable: the fluence distribution is truncated by the detector threshold (Malmquist bias) and the redshift is available only for a few percent of the sample.
+
+%=====================================================================
+\section{EX12: Dimensionality reduction and the HR diagram}
+
+\subsection*{Objective}
+
+The goal of this exercise is to apply PCA to a star catalogue and learn a key practical lesson: the importance of scaling the data before feeding them to a machine learning algorithm. After the PCA, I also used the reduced space for unsupervised clustering and, as a final step, I classified the star types with a supervised method.
+
+\subsection*{Data}
+
+The catalogue contains 240 stars with four numerical features (temperature, luminosity, radius, absolute magnitude) and three categorical ones (color, spectral class, star type with 6 classes). The string labels are converted to integers with \texttt{LabelEncoder}. There are no missing values. Plotting luminosity versus temperature in log scale reproduces the Hertzsprung-Russell diagram, where the star types occupy the familiar regions.
+
+\subsection*{PCA and the importance of scaling}
+
+Applying PCA directly to the raw features gives a useless result: PC1 explains 99.8\% of the variance, but only because temperature has values of order $10^4$ while the other features are of order unity. PCA maximizes variance, so the feature with the largest units dominates.
+
+I then log-transformed temperature, luminosity and radius, and standardized all features with \texttt{StandardScaler} (mean 0, variance 1). Now PC1 and PC2 explain 76\% and 22\% of the variance (98\% together) and the star types separate clearly in the PC1-PC2 plane. I repeated the same with \texttt{MinMaxScaler} in $[-1,1]$ with a very similar outcome. I also looked at the cumulative explained variance to choose the number of components with a 90\% threshold. The lesson: massaging the data before the algorithm changes the result completely.
+
+\subsection*{Clustering and classification}
+
+In the scaled PCA space I ran K-Means with $k=6$, the number of star types, and plotted the clusters both in the PCA plane and back in the HR plane: the clusters recover the structure of the star types. Finally I trained a multinomial logistic regression on the scaled log features. The accuracy is 0.986 on the training set and 0.988 on the test set, with nearly diagonal confusion matrices: with well-scaled features this classification problem is easy.
+
+%=====================================================================
+\section{EX13: Supernova distances and redshifts}
+
+\subsection*{Objective}
+
+The goal of this exercise is to model the Hubble diagram of Type Ia supernovae, distance modulus $\mu$ versus redshift $z$. It is in three parts. First, data-driven regression: linear, polynomial, basis function and kernel regression, choosing the complexity by intuition and then by cross validation. Second, Gaussian Process regression. Third, a physical fit: estimate the cosmological parameters $(\Omega_m, H_0)$ with MCMC and compare a universe with and without dark energy using the Bayesian evidence.
+
+\subsection*{Data and Part 1: regression}
+
+The data are 100 synthetic but realistic supernovae from \texttt{astroML} (\texttt{generate\_mu\_z}), with heteroscedastic errors.
+
+Linear regression (both sklearn and the astroML version, which accounts for the errors) clearly underfits: the relation is not linear. Polynomial regression with degrees 1 to 20 shows the classic behavior: degree 1 underfits, degrees 2 and 3 capture the trend well, high degrees (10, 15, 20) overfit with unphysical oscillations. Basis function regression with an increasing number of Gaussians behaves similarly. Nadaraya-Watson kernel regression depends on the bandwidth: too small overfits, too large washes out the low-$z$ behavior.
+
+\subsection*{Part 1b: cross validation}
+
+To pick the complexity objectively I used cross validation in two ways: \texttt{GridSearchCV} with small sklearn-compatible wrappers around the astroML models, and a manual K-Fold loop where I computed training and validation error as a function of the model complexity. The two errors diverge when the model overfits. The best models are: polynomial of degree 2 (RMS 0.87), basis function regression with 2 Gaussians (RMS 0.86), kernel regression with bandwidth 0.05 (RMS 0.88). This agrees with the initial visual bet. I also computed learning curves with a larger sample of 1000 points, watching the training and validation errors converge as the number of points grows.
+
+\subsection*{Part 2: Gaussian Process regression}
+
+I fitted a GPR with a constant times RBF kernel, feeding the measurement errors through the \texttt{alpha} parameter. The result is the posterior mean with its 1$\sigma$ and 2$\sigma$ bands. As an application, I used the KDE of the observed redshifts to draw new $z$ values and the GPR posterior to generate the corresponding $\mu$, cloning a synthetic dataset ten times larger than the original.
+
+\subsection*{Part 3: cosmological fit and model comparison}
+
+The physical model is a flat $\Lambda$CDM cosmology: $\mu(z)$ is the distance modulus from \texttt{astropy}, with parameters $\Omega_m$ and $H_0$. The likelihood is the standard Gaussian one and the priors are uniform, $\Omega_m \in (0,1)$ and $H_0 \in (40,100)$. I sampled the posterior with \texttt{emcee} (8 walkers, 10000 steps), checked the trace plots, discarded the burn-in and thinned by the autocorrelation time. The corner plot shows a strong anticorrelation between $\Omega_m$ and $H_0$ (correlation coefficient $-0.87$): the data constrain a combination of the two.
+
+Then I repeated the fit with nested sampling (\texttt{dynesty}) to get the evidence. For $\Lambda$CDM: $\log Z_1 = -48.82 \pm 0.12$. For a model without dark energy ($\Omega_m = 1$, only $H_0$ free): $\log Z_2 = -49.29 \pm 0.11$. The Bayes factor is $B_{12} \approx 1.6$: on the Jeffreys scale this is inconclusive. With only 100 supernovae at $z<2$ we cannot discriminate between the two models; more data would be needed.
+
+%=====================================================================
+\section{EX14: SDSS galaxies versus quasars}
+
+\subsection*{Objective}
+
+The goal of this exercise is photometric classification: separate galaxies from quasars using only the SDSS colors, without spectra. I compared four classifiers, selected their hyperparameters by cross validation, and evaluated them with accuracy, completeness and contamination, first using a single color and then all four.
+
+\subsection*{Data}
+
+From the SDSS magnitudes $u, g, r, i, z$ I built the four colors $u-g$, $g-r$, $r-i$, $i-z$. The labels (galaxy or quasar) are encoded as 0 and 1. Looking at the four color distributions, the one showing the clearest bimodality is $u-g$: quasars are bluer in this color because of their power-law continuum. So I first classified in 1D with $u-g$ alone, and then with all four colors.
+
+\subsection*{Classifiers and results}
+
+For each method the hyperparameter is chosen by cross validation, and the performance is measured on a held-out test set with ROC curves, accuracy, completeness (fraction of true quasars recovered) and contamination (fraction of false quasars among the selected ones).
+
+\textbf{GMMBayes.} A generative classifier: it models the density of each class with a Gaussian mixture and applies the Bayes rule. With $u-g$ only (best $k=4$): accuracy 0.981. With all four colors (best $k=19$): accuracy 0.986, completeness 0.951, contamination 0.050.
+
+\textbf{K-nearest neighbors.} With $u-g$ only (best $k=14$): accuracy 0.981. With all colors (best $k=17$): accuracy 0.986, completeness 0.947, contamination 0.046.
+
+\textbf{Quadratic Discriminant Analysis.} A single Gaussian per class: accuracy 0.981 in 1D, 0.980 in 4D.
+
+\textbf{Gaussian Naive Bayes.} Accuracy 0.981 in 1D but 0.973 in 4D: the assumption of independent features is wrong for colors, which are correlated.
+
+\subsection*{Conclusions}
+
+The flexible methods (GMMBayes, KNN) gain from the extra colors and reach about 98.6\% accuracy with 95\% completeness and 5\% contamination. The simple Gaussian models do not improve, because one Gaussian per class (QDA) or independent features (Naive Bayes) are too rigid for this data. As a final check I plotted the histogram of $u-g$ in the test set, split by true class and by predicted class, with the same bins: the predicted populations reproduce the true ones well.
+
+%=====================================================================
+\section{EX15: Gravitational wave detectability}
+
+\subsection*{Objective}
+
+The goal of this exercise is to machine-learn the LIGO selection function: predict whether a gravitational wave source will be detected, given its parameters. This matters because all surveys are flux limited, and to do population studies we must model the selection effects (the Malmquist bias). Detection is defined by the signal-to-noise ratio: a source is detected if $\mathrm{snr} > 12$.
+
+\subsection*{Data}
+
+The dataset contains $2\times10^7$ simulated binary black hole signals. Each source has 13 features: total mass, mass ratio, the six spin components, sky position, inclination, polarization angle and redshift. The label is the binary \texttt{det}. I used a subset of 20000 events for the tree-based models. The classes are unbalanced: 85.6\% not detected, 14.4\% detected, so 85.6\% is the trivial baseline to beat. The \texttt{snr} column is excluded from the features because it defines the label.
+
+\subsection*{Models}
+
+\textbf{Decision tree.} Depth chosen by cross validation (7): accuracy 0.950, completeness 0.774, contamination 0.128.
+
+\textbf{Random forest.} Depth 22 from cross validation: accuracy 0.960, completeness 0.839, contamination 0.115, ROC AUC 0.989.
+
+\textbf{Regression on snr.} Instead of classifying the thresholded labels, I regressed the \texttt{snr} itself with a random forest and applied the threshold $\mathrm{snr}>12$ to the predictions. This gives accuracy 0.964 and a clearly better completeness, 0.903: the regressor uses the information contained in the distance from the threshold, which the labels throw away.
+
+\textbf{PCA before classification.} Reducing the 13 features with PCA and then classifying makes things much worse (accuracy 0.889, completeness 0.341). The features are few and each one is physically informative, so dropping a dimension only loses information.
+
+\textbf{Neural network.} A fully connected network (three hidden layers of 256, 128 and 64 units, ReLU, dropout, Adam, early stopping on the validation AUC), trained on a larger subset of 500000 events since a network keeps improving with more data while the forests saturate. Result: accuracy 0.987, completeness 0.954, contamination 0.043, ROC AUC 0.999.
+
+\subsection*{Summary}
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+model & accuracy & completeness & contamination \\
+\midrule
+Decision tree & 0.950 & 0.774 & 0.128 \\
+Random forest & 0.960 & 0.839 & 0.115 \\
+RF regression on snr & 0.964 & 0.903 & 0.139 \\
+PCA + random forest & 0.889 & 0.341 & 0.218 \\
+Neural network & 0.987 & 0.954 & 0.043 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The neural network is the best model on all three metrics. The two lessons are: thresholding the predictions of a regressor beats classifying thresholded labels, and for this problem the decisive ingredient of the network is the amount of training data.
+
+%=====================================================================
+\section{EX16: The HiggsML challenge}
+
+\subsection*{Objective}
+
+The goal of this exercise is to implement a neural network for a binary classification problem: separate the Higgs signal events from the background in simulated ATLAS data. This dataset was a Kaggle challenge in 2014. The tasks are: scale the data, choose a testing strategy, build and optimize a network, and report the performance, including the official metric of the challenge (the AMS).
+
+\subsection*{Data}
+
+There are 250000 events with 30 features each, plus a label (signal or background) and a physical weight per event. The value $-999$ is a padding for missing entries (it depends on the jet multiplicity); I replaced it with the column mean. Looking at the feature histograms split by class, the most discriminating variable is the transverse mass \texttt{DER\_mass\_transverse\_met\_lep}. I used an 80/20 stratified train/test split and standardized the features with a scaler fitted on the training set only.
+
+\subsection*{Network and hyperparameter optimization}
+
+The model is a fully connected network in Keras with a sigmoid output. The hyperparameters are optimized with \texttt{keras-tuner} using random search over: number of layers (1 to 4), units per layer (32 to 256), dropout rate (0 to 0.5) and learning rate ($10^{-4}$ to $10^{-2}$, log scale). The objective is the validation AUC, with early stopping, over 20 trials. The best configuration is retrained on the full training set. On the test set: accuracy 0.840 and ROC AUC 0.908.
+
+\subsection*{The AMS metric}
+
+The challenge metric is the Approximate Median Significance,
+\[
+\mathrm{AMS} = \sqrt{2\left[(s+b+b_r)\ln\!\left(1+\frac{s}{b+b_r}\right)-s\right]}, \qquad b_r = 10,
+\]
+where $s$ and $b$ are the summed weights of the true signal and of the background events selected as signal. It approximates the discovery significance. One detail matters: the weights are normalized to the full luminosity, in fact the signal weights of the whole file sum to $N_s \simeq 692$ and the background ones to $N_b \simeq 411000$, the expected event counts. My test set holds only 20\% of the events, so before computing the AMS I rescaled its weights, per class, back to those sums. Without this step the AMS comes out a factor $\sqrt{5}$ too small and cannot be compared with the leaderboard.
+
+The classifier gives a probability, so I scanned the selection threshold and kept the value that maximizes the AMS. The result is $\mathrm{AMS} = 3.38$ at threshold $0.78$. The winner of the competition reached $3.806$, so this simple network is not that far off.
+
+\end{document}
